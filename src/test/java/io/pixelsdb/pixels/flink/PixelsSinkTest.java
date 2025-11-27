@@ -30,9 +30,9 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -47,9 +47,6 @@ public class PixelsSinkTest {
                             .setNumberSlotsPerTaskManager(1)
                             .setNumberTaskManagers(1)
                             .build());
-
-    @ClassRule
-    public static TemporaryFolder tempFolder = new TemporaryFolder();
 
     private static Server server;
     private static int port;
@@ -74,15 +71,26 @@ public class PixelsSinkTest {
 
     @Test
     public void testPaimonSink() throws Exception {
-        runTest("paimon", tempFolder.newFolder("paimon").toURI().toString());
+        runTest("paimon");
     }
 
     @Test
     public void testIcebergSink() throws Exception {
-        runTest("iceberg", tempFolder.newFolder("iceberg").toURI().toString());
+        runTest("iceberg");
     }
 
-    private void runTest(String sinkType, String warehouse) throws Exception {
+    private void runTest(String sinkType) throws Exception {
+        // Load Properties
+        Properties props = new Properties();
+        try (InputStream input = PixelsFlinkApp.class.getClassLoader().getResourceAsStream("pixels-client.properties")) {
+            if (input != null) {
+                props.load(input);
+            } else {
+                System.out.println("Sorry, unable to find pixels-client.properties");
+                return;
+            }
+        }
+
         // Push data
         responseQueue.add(createInsertEvent());
         responseQueue.add(createUpdateEvent());
@@ -92,21 +100,30 @@ public class PixelsSinkTest {
         // Enable Checkpoint for Sinks
         env.enableCheckpointing(1000);
 
-        Properties props = new Properties();
+        // Overwrite/Ensure essential properties
         props.setProperty("pixels.server.host", "localhost");
         props.setProperty("pixels.server.port", String.valueOf(port));
-        props.setProperty("schema.name", "public");
-        props.setProperty("table.name", "test_table_" + sinkType);
         props.setProperty("sink.type", sinkType);
-        props.setProperty("checkpoint.interval.ms", "1000");
         
+        String warehouse;
         if ("paimon".equals(sinkType)) {
-            props.setProperty("paimon.catalog.warehouse", warehouse);
-            props.setProperty("paimon.table.name", "paimon_tbl");
+            warehouse = props.getProperty("paimon.catalog.warehouse");
+            if (warehouse == null) throw new RuntimeException("paimon.catalog.warehouse is not set in properties");
 
             // Create Paimon Table
             Options options = new Options();
             options.set("warehouse", warehouse);
+            
+            // Add S3 options
+            if (props.containsKey("s3.access-key")) options.set("s3.access-key", props.getProperty("s3.access-key"));
+            if (props.containsKey("s3.secret-key")) options.set("s3.secret-key", props.getProperty("s3.secret-key"));
+            if (props.containsKey("s3.endpoint")) options.set("s3.endpoint", props.getProperty("s3.endpoint"));
+            if (props.containsKey("s3.path.style.access")) options.set("s3.path.style.access", props.getProperty("s3.path.style.access"));
+
+            // Enable S3 support for Hadoop FileSystem
+            options.set("hadoop.fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+            options.set("hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+
             org.apache.paimon.catalog.Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
             try {
                 catalog.createDatabase("default", true);
@@ -117,21 +134,38 @@ public class PixelsSinkTest {
             schemaBuilder.column("id", DataTypes.INT());
             schemaBuilder.column("data", DataTypes.STRING());
             schemaBuilder.primaryKey("id");
-            catalog.createTable(Identifier.create("default", "paimon_tbl"), schemaBuilder.build(), false);
+            try {
+                catalog.createTable(Identifier.create("default", props.getProperty("paimon.table.name", "paimon_tbl")), schemaBuilder.build(), false);
+            } catch (org.apache.paimon.catalog.Catalog.TableAlreadyExistException e) {
+                // Ignore
+            }
         } else {
+            warehouse = props.getProperty("iceberg.catalog.warehouse");
+            if (warehouse == null) throw new RuntimeException("iceberg.catalog.warehouse is not set in properties");
+            
             props.setProperty("iceberg.catalog.type", "hadoop");
-            props.setProperty("iceberg.catalog.warehouse", warehouse);
-            props.setProperty("iceberg.table.name", "iceberg_tbl");
 
             // Create Iceberg Table
             Configuration hadoopConf = new Configuration();
+            // Add S3 options
+            if (props.containsKey("s3.access-key")) hadoopConf.set("fs.s3a.access.key", props.getProperty("s3.access-key"));
+            if (props.containsKey("s3.secret-key")) hadoopConf.set("fs.s3a.secret.key", props.getProperty("s3.secret-key"));
+            if (props.containsKey("s3.endpoint")) hadoopConf.set("fs.s3a.endpoint", props.getProperty("s3.endpoint"));
+            if (props.containsKey("s3.path.style.access")) hadoopConf.set("fs.s3a.path.style.access", props.getProperty("s3.path.style.access"));
+            
+            // Enable S3 support
+            hadoopConf.set("fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+            hadoopConf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+
             HadoopCatalog catalog = new HadoopCatalog(hadoopConf, warehouse);
             org.apache.iceberg.Schema schema = new org.apache.iceberg.Schema(
                     Types.NestedField.required(1, "id", Types.IntegerType.get()),
                     Types.NestedField.required(2, "data", Types.StringType.get())
             );
-            TableIdentifier name = TableIdentifier.of("default", "iceberg_tbl");
-            catalog.createTable(name, schema, PartitionSpec.unpartitioned());
+            TableIdentifier name = TableIdentifier.of("default", props.getProperty("iceberg.table.name", "iceberg_tbl"));
+            if (!catalog.tableExists(name)) {
+                catalog.createTable(name, schema, PartitionSpec.unpartitioned());
+            }
         }
 
         // Build job graph

@@ -8,8 +8,10 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
+import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.hadoop.HadoopCatalog;
+import org.apache.iceberg.flink.CatalogLoader;
+import org.apache.iceberg.flink.TableLoader;
 import org.apache.iceberg.flink.sink.FlinkSink;
 import org.apache.iceberg.Table;
 
@@ -24,6 +26,8 @@ import org.apache.hadoop.conf.Configuration;
 
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 
 public class PixelsFlinkApp {
@@ -86,7 +90,25 @@ public class PixelsFlinkApp {
 
         Options options = new Options();
         options.set("warehouse", warehouse);
+
+        // Configure S3 if properties exist
+        if (props.containsKey("s3.access-key")) {
+            options.set("s3.access-key", props.getProperty("s3.access-key"));
+        }
+        if (props.containsKey("s3.secret-key")) {
+            options.set("s3.secret-key", props.getProperty("s3.secret-key"));
+        }
+        if (props.containsKey("s3.endpoint")) {
+            options.set("s3.endpoint", props.getProperty("s3.endpoint"));
+        }
+        if (props.containsKey("s3.path.style.access")) {
+            options.set("s3.path.style.access", props.getProperty("s3.path.style.access"));
+        }
         
+        // Enable S3 support
+        options.set("hadoop.fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+        options.set("hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+
         try {
             org.apache.paimon.catalog.Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
             org.apache.paimon.table.Table table = catalog.getTable(Identifier.create(dbName, tblName));
@@ -101,6 +123,7 @@ public class PixelsFlinkApp {
     }
 
     private static void configureIcebergSink(DataStream<RowData> stream, Properties props) {
+        String catalogType = props.getProperty("iceberg.catalog.type", "hadoop");
         String warehouse = props.getProperty("iceberg.catalog.warehouse");
         String tableNameStr = props.getProperty("iceberg.table.name");
         
@@ -113,14 +136,78 @@ public class PixelsFlinkApp {
             tblName = parts[1];
         }
 
-        // Initialize Iceberg Catalog (using HadoopCatalog for simplicity as per properties default)
+        // Initialize Configuration
         Configuration hadoopConf = new Configuration();
-        HadoopCatalog catalog = new HadoopCatalog(hadoopConf, warehouse);
+        
+        // Configure S3 if properties exist (for non-AWS S3 like MinIO)
+        if (props.containsKey("s3.access-key")) {
+            hadoopConf.set("fs.s3a.access.key", props.getProperty("s3.access-key"));
+        }
+        if (props.containsKey("s3.secret-key")) {
+            hadoopConf.set("fs.s3a.secret.key", props.getProperty("s3.secret-key"));
+        }
+        if (props.containsKey("s3.endpoint")) {
+            hadoopConf.set("fs.s3a.endpoint", props.getProperty("s3.endpoint"));
+        }
+        if (props.containsKey("s3.path.style.access")) {
+            hadoopConf.set("fs.s3a.path.style.access", props.getProperty("s3.path.style.access"));
+        }
 
+        // Enable S3 support
+        hadoopConf.set("fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+        hadoopConf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+
+        CatalogLoader catalogLoader;
+        Map<String, String> catalogProps = new HashMap<>();
+        catalogProps.put("warehouse", warehouse);
+
+        if ("glue".equalsIgnoreCase(catalogType)) {
+            // AWS Glue Catalog - credentials auto-discovered from ~/.aws/credentials
+            catalogProps.put("catalog-impl", "org.apache.iceberg.aws.glue.GlueCatalog");
+            catalogProps.put("io-impl", "org.apache.iceberg.aws.s3.S3FileIO");
+            
+            // Optional: Specify AWS region if not in ~/.aws/config
+            if (props.containsKey("iceberg.catalog.glue.region")) {
+                catalogProps.put("glue.region", props.getProperty("iceberg.catalog.glue.region"));
+            }
+            
+            catalogLoader = CatalogLoader.custom("glue_catalog", catalogProps, hadoopConf, 
+                "org.apache.iceberg.aws.glue.GlueCatalog");
+        } else if ("rest".equalsIgnoreCase(catalogType)) {
+            String uri = props.getProperty("iceberg.catalog.uri");
+            String credential = props.getProperty("iceberg.catalog.credential");
+            
+            catalogProps.put("uri", uri);
+            catalogProps.put("io-impl", "org.apache.iceberg.aws.s3.S3FileIO");
+            if (credential != null) {
+                catalogProps.put("credential", credential);
+            }
+            
+            // Pass S3 properties to Catalog properties (needed for S3FileIO)
+            if (props.containsKey("s3.endpoint")) {
+                catalogProps.put("s3.endpoint", props.getProperty("s3.endpoint"));
+            }
+            if (props.containsKey("s3.access-key")) {
+                catalogProps.put("s3.access-key-id", props.getProperty("s3.access-key"));
+            }
+            if (props.containsKey("s3.secret-key")) {
+                catalogProps.put("s3.secret-access-key", props.getProperty("s3.secret-key"));
+            }
+            if (props.containsKey("s3.path.style.access")) {
+                catalogProps.put("s3.path-style-access", props.getProperty("s3.path.style.access"));
+            }
+
+            catalogLoader = CatalogLoader.custom("rest_catalog", catalogProps, hadoopConf, "org.apache.iceberg.rest.RESTCatalog");
+        } else {
+            // Hadoop Catalog (can still work with S3)
+            catalogLoader = CatalogLoader.hadoop("hadoop_catalog", hadoopConf, catalogProps);
+        }
+
+        Catalog catalog = catalogLoader.loadCatalog();
         TableIdentifier identifier = TableIdentifier.of(dbName, tblName);
         Table table = catalog.loadTable(identifier);
         
-        org.apache.iceberg.flink.TableLoader tableLoader = org.apache.iceberg.flink.TableLoader.fromHadoopTable(table.location(), hadoopConf);
+        TableLoader tableLoader = TableLoader.fromCatalog(catalogLoader, identifier);
 
         FlinkSink.forRowData(stream)
                 .tableLoader(tableLoader)
