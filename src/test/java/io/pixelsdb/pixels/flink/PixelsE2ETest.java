@@ -116,14 +116,18 @@ public class PixelsE2ETest {
         // Enable fast checkpointing for tests
         props.setProperty("checkpoint.interval.ms", "500");
         
-        String tableName = "test_" + sinkType + "_tbl";
-        String warehouse = "";
+        String tableName;
+        String warehouse;
 
         if ("paimon".equals(sinkType)) {
-            // Use temp folder for testing
-            warehouse = tempFolder.newFolder("paimon_warehouse").toURI().toString();
-            props.setProperty("paimon.catalog.warehouse", warehouse);
-            props.setProperty("paimon.table.name", tableName);
+            warehouse = props.getProperty("paimon.catalog.warehouse");
+            if (warehouse == null) {
+                throw new RuntimeException("paimon.catalog.warehouse must be configured in pixels-client.properties");
+            }
+            tableName = props.getProperty("paimon.table.name");
+            if (tableName == null) {
+                throw new RuntimeException("paimon.table.name must be configured in pixels-client.properties");
+            }
 
             // Create Paimon Table
             Options options = new Options();
@@ -153,11 +157,14 @@ public class PixelsE2ETest {
             schemaBuilder.primaryKey("id");
             catalog.createTable(id, schemaBuilder.build(), false);
         } else {
-            // Use temp folder for testing and force Hadoop catalog
-            warehouse = tempFolder.newFolder("iceberg_warehouse").toURI().toString();
-            props.setProperty("iceberg.catalog.warehouse", warehouse);
-            props.setProperty("iceberg.catalog.type", "hadoop");
-            props.setProperty("iceberg.table.name", tableName);
+            warehouse = props.getProperty("iceberg.catalog.warehouse");
+            if (warehouse == null) {
+                throw new RuntimeException("iceberg.catalog.warehouse must be configured in pixels-client.properties");
+            }
+            tableName = props.getProperty("iceberg.table.name");
+             if (tableName == null) {
+                throw new RuntimeException("iceberg.table.name must be configured in pixels-client.properties");
+            }
 
             // Create Iceberg Table
             Configuration hadoopConf = new Configuration();
@@ -167,7 +174,7 @@ public class PixelsE2ETest {
             if (props.containsKey("s3.endpoint")) hadoopConf.set("fs.s3a.endpoint", props.getProperty("s3.endpoint"));
             if (props.containsKey("s3.path.style.access")) hadoopConf.set("fs.s3a.path.style.access", props.getProperty("s3.path.style.access"));
 
-            String catalogType = "hadoop"; // Always use Hadoop catalog for testing
+            String catalogType = props.getProperty("iceberg.catalog.type", "hadoop");
             CatalogLoader loader;
             Map<String, String> catalogProps = new HashMap<>();
             catalogProps.put("warehouse", warehouse);
@@ -249,6 +256,12 @@ public class PixelsE2ETest {
         // Register Catalog Once
         if ("paimon".equals(sinkType)) {
             String warehouse = props.getProperty("paimon.catalog.warehouse");
+            // Parse database from table name if present
+            String dbName = "default";
+            if (tableName.contains(".")) {
+                dbName = tableName.split("\\.")[0];
+            }
+
             StringBuilder ddl = new StringBuilder();
             ddl.append("CREATE CATALOG paimon_verify WITH (");
             ddl.append("'type'='paimon', ");
@@ -262,10 +275,19 @@ public class PixelsE2ETest {
             
             tEnv.executeSql(ddl.toString());
             tEnv.executeSql("USE CATALOG paimon_verify");
+            if (!"default".equals(dbName)) {
+                 tEnv.executeSql("USE " + dbName);
+            }
         } else {
             String warehouse = props.getProperty("iceberg.catalog.warehouse");
             String catalogType = props.getProperty("iceberg.catalog.type", "hadoop");
             
+            // Parse database from table name if present
+            String dbName = "default";
+            if (tableName.contains(".")) {
+                dbName = tableName.split("\\.")[0];
+            }
+
             StringBuilder ddl = new StringBuilder();
             ddl.append("CREATE CATALOG iceberg_verify WITH (");
             ddl.append("'type'='iceberg', ");
