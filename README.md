@@ -1,16 +1,25 @@
 # Pixels Flink Source
 
 ## Introduction
-`pixels-flink-source` is a custom Apache Flink Source Connector that retrieves data in real-time from a Pixels-sink server via gRPC. It supports writing data to data lakes such as Apache Iceberg and Apache Paimon.
+`pixels-flink-source` is a custom Apache Flink Source Connector designed to ingest data in real-time from a Pixels-sink server using gRPC polling. It enables seamless data synchronization from Pixels to modern data lakes, specifically supporting **Apache Iceberg** (with AWS Glue Catalog) and **Apache Paimon**, backed by S3 storage.
 
 ## Features
-*   **RPC Source**: Fetches data using gRPC polling mechanism.
-*   **Multi-Sink Support**: Integrated `PixelsFlinkApp` application supports sinking data to both **Apache Paimon** and **Apache Iceberg**.
-*   **Configuration**: Driven by `pixels-client.properties` for easy configuration of connections and catalogs.
+*   **RPC Source**: High-performance data fetching via gRPC polling mechanism.
+*   **Schema Mapping**: Configurable source schema definition to map Pixels data types to Flink RowData.
+*   **Multi-Sink Support**: Integrated support for writing to:
+    *   **Apache Iceberg**: Supports AWS Glue Catalog and S3 storage.
+    *   **Apache Paimon**: Supports S3 filesystem catalog.
+*   **Cloud Native**: Built with AWS SDK v2, ready for cloud deployments with S3 and Glue integration.
+*   **Configurable**: Fully driven by `pixels-client.properties` for easy management of connections, schemas, and catalogs.
+
+## Prerequisites
+*   Java 11+
+*   Maven 3.6+
+*   AWS Credentials (for S3 and Glue access)
 
 ## Build
 
-Ensure Maven 3.6+ and Java 11 are installed.
+Clone the repository and build the project using Maven:
 
 ```bash
 mvn clean package
@@ -18,72 +27,69 @@ mvn clean package
 
 The build artifact will be located at `target/pixels-flink-source-1.0-SNAPSHOT.jar`.
 
-## Run Tests
+## Configuration
 
-This project includes integration tests to verify the Source functionality and Sink integrations.
+The application is configured via `src/main/resources/pixels-client.properties`. You can modify this file before building, or provide a modified version at runtime on the classpath.
 
-```bash
-mvn clean test
-```
-
-## Run Application
-
-The project includes a main application class `io.pixelsdb.pixels.flink.PixelsFlinkApp`, which reads the configuration file and starts a Flink job to synchronize Pixels data to the configured data lake.
-
-### 1. Configuration
-Modify `src/main/resources/pixels-client.properties` (or replace the file in classpath at runtime):
-
+### Core Configuration
 ```properties
-# Pixels Server Configuration
+# Pixels Server Connection
 pixels.server.host=localhost
 pixels.server.port=50051
+schema.name=public
 table.name=orders
 
-# Sink Type (paimon or iceberg)
-sink.type=paimon
+# Source Schema Definition
+# Format: col1:TYPE,col2:TYPE
+# Supported Types: INT, BIGINT, STRING, FLOAT, DOUBLE, BOOLEAN
+source.schema=id:INT,data:STRING,price:DOUBLE
 
-# Paimon Configuration
-paimon.catalog.type=paimon
-paimon.catalog.warehouse=file:///tmp/paimon
-paimon.table.name=paimon_orders
+# Flink Checkpoint Interval (Required for streaming sinks)
+checkpoint.interval.ms=10000
+```
 
-# Iceberg Configuration
-iceberg.catalog.type=hadoop
-iceberg.catalog.warehouse=file:///tmp/iceberg
+### Sink Configuration
+
+Select the target sink type:
+```properties
+# Options: iceberg, paimon
+sink.type=iceberg
+```
+
+#### Apache Iceberg (AWS Glue Catalog)
+```properties
+# Catalog Type: glue (Recommended for AWS), hadoop, rest
+iceberg.catalog.type=glue
+
+# S3 Warehouse Path
+iceberg.catalog.warehouse=s3://your-bucket/iceberg/
 iceberg.table.name=iceberg_orders
+
+# Optional: AWS Region (if not set in ~/.aws/config)
+# iceberg.catalog.glue.region=us-east-1
 ```
 
-### 2. Submit Job
-Submit the job using Flink:
+#### Apache Paimon
+```properties
+# Catalog Type
+paimon.catalog.type=paimon
 
-```bash
-flink run -c io.pixelsdb.pixels.flink.PixelsFlinkApp target/pixels-flink-source-1.0-SNAPSHOT.jar
+# S3 Warehouse Path
+paimon.catalog.warehouse=s3://your-bucket/paimon/
+paimon.table.name=paimon_orders
 ```
 
-## Code Example (Custom Development)
+## AWS Setup
 
-If you need to develop a custom Flink job:
+To use S3 and AWS Glue, you must configure AWS credentials. The application uses the default AWS credential provider chain, looking for credentials in the following order:
 
-```java
-import io.pixelsdb.pixels.flink.PixelsRpcSource;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.table.types.logical.IntType;
-import java.util.Properties;
+1.  **Environment Variables**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`
+2.  **System Properties**: `aws.accessKeyId`, `aws.secretKey`
+3.  **Credentials File**: `~/.aws/credentials`
+4.  **Config File**: `~/.aws/config`
+5.  **Instance Profile**: EC2/EKS IAM Role
 
-// ...
-
-Properties props = new Properties();
-props.setProperty("pixels.server.host", "localhost");
-props.setProperty("pixels.server.port", "50051");
-props.setProperty("table.name", "orders");
-
-// Define Schema (Matching Pixels table structure)
-RowType rowType = RowType.of(
-    new LogicalType[] { new IntType(), new VarCharType() },
-    new String[] { "id", "data" }
-);
-
-// Add Source
-DataStream<RowData> stream = env.addSource(new PixelsRpcSource(props, rowType));
-// ...
+### IAM Permissions
+Ensure your IAM identity has permissions for:
+*   **S3**: `GetObject`, `PutObject`, `ListBucket`, `DeleteObject` on your warehouse bucket.
+*   **Glue**: `CreateDatabase`, `CreateTable`, `GetTable`, `UpdateTable`, etc., if using Iceberg with Glue Catalog.
