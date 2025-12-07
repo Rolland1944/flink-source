@@ -56,6 +56,10 @@ public class PixelsRpcSource extends RichSourceFunction<RowData> {
                 PollResponse response = client.pollEvents(schemaName, tableName);
                 List<RowRecord> events = response.getEventsList();
 
+                if (!events.isEmpty()) {
+                    LOG.info("PixelsRpcSource received {} events", events.size());
+                }
+
                 for (RowRecord event : events) {
                     processEvent(event, ctx);
                 }

@@ -6,6 +6,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.logical.*;
 
 import org.apache.iceberg.catalog.Catalog;
+import org.apache.iceberg.catalog.Namespace;
+import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.flink.CatalogLoader;
 import org.apache.iceberg.flink.TableLoader;
@@ -86,6 +88,11 @@ public class PixelsFlinkApp {
 
         try {
             org.apache.paimon.catalog.Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
+            try {
+                catalog.createDatabase(dbName, true);
+            } catch (Exception e) {
+                // Ignore if database creation fails, it might already exist or user doesn't have permission
+            }
             org.apache.paimon.table.Table table = catalog.getTable(Identifier.create(dbName, tblName));
 
             new FlinkSinkBuilder((FileStoreTable) table)
@@ -134,6 +141,17 @@ public class PixelsFlinkApp {
         }
 
         Catalog catalog = catalogLoader.loadCatalog();
+        if (catalog instanceof SupportsNamespaces) {
+            try {
+                SupportsNamespaces nsCatalog = (SupportsNamespaces) catalog;
+                Namespace ns = Namespace.of(dbName);
+                if (!nsCatalog.namespaceExists(ns)) {
+                    nsCatalog.createNamespace(ns);
+                }
+            } catch (Exception e) {
+                // Ignore if namespace creation fails
+            }
+        }
         TableIdentifier identifier = TableIdentifier.of(dbName, tblName);
         TableLoader tableLoader = TableLoader.fromCatalog(catalogLoader, identifier);
 

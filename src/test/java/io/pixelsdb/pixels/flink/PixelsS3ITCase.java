@@ -172,13 +172,18 @@ public class PixelsS3ITCase {
         tEnv.executeSql(ddl.toString());
         tEnv.executeSql("USE CATALOG " + catalogName);
 
-        String dbName = "default";
+        String dbKey = "iceberg".equalsIgnoreCase(sinkType) ? "iceberg.database.name" : "paimon.database.name";
+        String dbName = props.getProperty(dbKey);
         String tblName = fullTableName;
         if (fullTableName.contains(".")) {
             String[] parts = fullTableName.split("\\.");
             dbName = parts[0];
             tblName = parts[1];
         }
+        if (dbName == null || dbName.trim().isEmpty()) {
+            dbName = "default";
+        }
+
         if (!"default".equalsIgnoreCase(dbName)) {
              tEnv.executeSql("CREATE DATABASE IF NOT EXISTS `" + dbName + "`");
         }
@@ -257,12 +262,16 @@ public class PixelsS3ITCase {
         tEnv.executeSql("USE CATALOG " + catalogName);
 
         // Parse DB and Table
-        String dbName = "default";
+        String dbKey = "iceberg".equalsIgnoreCase(sinkType) ? "iceberg.database.name" : "paimon.database.name";
+        String dbName = props.getProperty(dbKey);
         String tblName = fullTableName;
         if (fullTableName.contains(".")) {
             String[] parts = fullTableName.split("\\.");
             dbName = parts[0];
             tblName = parts[1];
+        }
+        if (dbName == null || dbName.trim().isEmpty()) {
+            dbName = "default";
         }
         tEnv.executeSql("USE `" + dbName + "`");
 
@@ -293,6 +302,7 @@ public class PixelsS3ITCase {
                 }
             } catch (Exception e) {
                 System.out.println("Query failed (table might not exist yet): " + e.getMessage());
+                e.printStackTrace();
             }
             Thread.sleep(5000);
         }
@@ -340,6 +350,8 @@ public class PixelsS3ITCase {
             PollResponse response = responseQueue.poll();
             if (response == null) {
                 response = PollResponse.newBuilder().build();
+            } else {
+                System.out.println("MockServer: Serving response with " + response.getEventsCount() + " events.");
             }
             responseObserver.onNext(response);
             responseObserver.onCompleted();
