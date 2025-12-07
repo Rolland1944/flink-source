@@ -28,6 +28,8 @@ import org.apache.hadoop.conf.Configuration;
 
 import java.io.InputStream;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class PixelsFlinkApp {
     public static void main(String[] args) throws Exception {
@@ -171,17 +173,18 @@ public class PixelsFlinkApp {
     }
 
     private static RowType parseSchema(String schemaStr) {
-        String[] columns = schemaStr.split(",");
+        List<String> columns = splitSchemaString(schemaStr);
         List<String> names = new ArrayList<>();
         List<LogicalType> types = new ArrayList<>();
 
         for (String col : columns) {
-            String[] parts = col.trim().split(":");
-            if (parts.length != 2) {
+            // Split by first colon
+            int colonIndex = col.indexOf(':');
+            if (colonIndex == -1) {
                 throw new IllegalArgumentException("Invalid schema format. Expected 'name:type', got: " + col);
             }
-            String name = parts[0].trim();
-            String typeStr = parts[1].trim().toUpperCase();
+            String name = col.substring(0, colonIndex).trim();
+            String typeStr = col.substring(colonIndex + 1).trim().toUpperCase();
 
             names.add(name);
             types.add(mapType(typeStr));
@@ -193,14 +196,68 @@ public class PixelsFlinkApp {
         );
     }
 
+    private static List<String> splitSchemaString(String schemaStr) {
+        List<String> parts = new ArrayList<>();
+        int depth = 0;
+        StringBuilder current = new StringBuilder();
+        for (char c : schemaStr.toCharArray()) {
+            if (c == ',' && depth == 0) {
+                if (current.length() > 0) {
+                    parts.add(current.toString().trim());
+                    current.setLength(0);
+                }
+            } else {
+                if (c == '(' || c == '<') depth++;
+                if (c == ')' || c == '>') depth--;
+                current.append(c);
+            }
+        }
+        if (current.length() > 0) {
+            parts.add(current.toString().trim());
+        }
+        return parts;
+    }
+
     private static LogicalType mapType(String typeStr) {
+        // Handle types with parameters
+        if (typeStr.startsWith("DECIMAL")) {
+            Matcher m = Pattern.compile("DECIMAL\\s*\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)").matcher(typeStr);
+            if (m.find()) {
+                int p = Integer.parseInt(m.group(1));
+                int s = Integer.parseInt(m.group(2));
+                return new DecimalType(p, s);
+            }
+            return new DecimalType(10, 0); // Default
+        }
+        if (typeStr.startsWith("VARCHAR")) {
+             Matcher m = Pattern.compile("VARCHAR\\s*\\(\\s*(\\d+)\\s*\\)").matcher(typeStr);
+             if (m.find()) {
+                 return new VarCharType(Integer.parseInt(m.group(1)));
+             }
+             return new VarCharType(VarCharType.MAX_LENGTH);
+        }
+        if (typeStr.startsWith("CHAR")) {
+             Matcher m = Pattern.compile("CHAR\\s*\\(\\s*(\\d+)\\s*\\)").matcher(typeStr);
+             if (m.find()) {
+                 return new CharType(Integer.parseInt(m.group(1)));
+             }
+             return new CharType(1);
+        }
+        if (typeStr.startsWith("FIXED")) {
+             Matcher m = Pattern.compile("FIXED\\s*\\(\\s*(\\d+)\\s*\\)").matcher(typeStr);
+             if (m.find()) {
+                 return new BinaryType(Integer.parseInt(m.group(1)));
+             }
+             throw new IllegalArgumentException("FIXED type requires length: " + typeStr);
+        }
+
         switch (typeStr) {
             case "INT":
             case "INTEGER":
                 return new IntType();
             case "STRING":
             case "VARCHAR":
-                return new VarCharType();
+                return new VarCharType(VarCharType.MAX_LENGTH);
             case "BIGINT":
             case "LONG":
                 return new BigIntType();
@@ -211,6 +268,18 @@ public class PixelsFlinkApp {
             case "BOOLEAN":
             case "BOOL":
                 return new BooleanType();
+            case "BINARY":
+            case "VARBINARY":
+                return new VarBinaryType(VarBinaryType.MAX_LENGTH);
+            case "DATE":
+                return new DateType();
+            case "TIME":
+                return new TimeType();
+            case "TIMESTAMP":
+                return new TimestampType(6); // Default precision 6 (microseconds)
+            case "TIMESTAMPTZ":
+            case "TIMESTAMP_LTZ":
+                return new LocalZonedTimestampType(6);
             default:
                 throw new UnsupportedOperationException("Unsupported type in config: " + typeStr);
         }

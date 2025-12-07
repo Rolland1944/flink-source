@@ -8,15 +8,24 @@ import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.RowRecord;
 import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.RowValue;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Properties;
 
@@ -120,9 +129,17 @@ public class PixelsRpcSource extends RichSourceFunction<RowData> {
         if (byteString == null || byteString.isEmpty()) {
             return null;
         }
+
+        switch (type.getTypeRoot()) {
+            case BINARY:
+            case VARBINARY:
+                return byteString.toByteArray();
+            default:
+                // Continue to string parsing
+        }
+
         String value = byteString.toStringUtf8();
         
-        // Basic type parsing
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
@@ -137,7 +154,23 @@ public class PixelsRpcSource extends RichSourceFunction<RowData> {
                 return Double.parseDouble(value);
             case BOOLEAN:
                 return Boolean.parseBoolean(value);
-            // Add more types as needed
+            case DECIMAL:
+                DecimalType decimalType = (DecimalType) type;
+                return DecimalData.fromBigDecimal(new BigDecimal(value), decimalType.getPrecision(), decimalType.getScale());
+            case DATE:
+                return (int) LocalDate.parse(value).toEpochDay();
+            case TIME_WITHOUT_TIME_ZONE:
+                return (int) (LocalTime.parse(value).toNanoOfDay() / 1_000_000L);
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                // Assuming format yyyy-MM-dd HH:mm:ss or ISO
+                try {
+                    return TimestampData.fromLocalDateTime(LocalDateTime.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+                } catch (Exception e) {
+                    // Fallback to ISO
+                    return TimestampData.fromLocalDateTime(LocalDateTime.parse(value));
+                }
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return TimestampData.fromInstant(ZonedDateTime.parse(value).toInstant());
             default:
                 return StringData.fromString(value); // Fallback
         }
