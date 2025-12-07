@@ -42,7 +42,12 @@ table.name=orders
 
 # Source Schema Definition
 # Format: col1:TYPE,col2:TYPE
-# Supported Types: INT, BIGINT, STRING, FLOAT, DOUBLE, BOOLEAN
+# Supported Types: 
+#   Numerics: INT, BIGINT, FLOAT, DOUBLE, DECIMAL(P,S)
+#   Strings: STRING, VARCHAR(N), CHAR(N)
+#   Binary: BINARY, VARBINARY, FIXED(L)
+#   Time: DATE, TIME, TIMESTAMP, TIMESTAMPTZ
+#   Other: BOOLEAN
 source.schema=id:INT,data:STRING,price:DOUBLE
 
 # Flink Checkpoint Interval (Required for streaming sinks)
