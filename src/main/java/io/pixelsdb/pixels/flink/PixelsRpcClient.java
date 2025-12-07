@@ -14,6 +14,11 @@ import java.util.concurrent.TimeUnit;
 public class PixelsRpcClient implements Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(PixelsRpcClient.class);
 
+    static {
+        // Force gRPC to use NIO transport to avoid Invalid argument errors with native Epoll on some Linux environments
+        System.setProperty("io.grpc.netty.shaded.io.netty.transport.noNative", "true");
+    }
+
     private final ManagedChannel channel;
     private final PixelsPollingServiceGrpc.PixelsPollingServiceBlockingStub blockingStub;
 
