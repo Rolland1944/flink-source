@@ -69,12 +69,16 @@ public class PixelsFlinkApp {
         String tableNameStr = props.getProperty("paimon.table.name");
         
         // Parse database and table name
-        String dbName = "default";
+        String dbName = props.getProperty("paimon.database.name");
         String tblName = tableNameStr;
         if (tableNameStr.contains(".")) {
             String[] parts = tableNameStr.split("\\.");
             dbName = parts[0];
             tblName = parts[1];
+        }
+
+        if (dbName == null || dbName.trim().isEmpty()) {
+            throw new RuntimeException("Paimon database name is not configured. Please set 'paimon.database.name' in properties or use 'db.table' format in 'paimon.table.name'.");
         }
 
         Options options = new Options();
@@ -99,12 +103,16 @@ public class PixelsFlinkApp {
         String tableNameStr = props.getProperty("iceberg.table.name");
         
         // Parse database and table name
-        String dbName = "default";
+        String dbName = props.getProperty("iceberg.database.name");
         String tblName = tableNameStr;
         if (tableNameStr.contains(".")) {
             String[] parts = tableNameStr.split("\\.");
             dbName = parts[0];
             tblName = parts[1];
+        }
+
+        if (dbName == null || dbName.trim().isEmpty()) {
+            throw new RuntimeException("Iceberg database name is not configured. Please set 'iceberg.database.name' in properties or use 'db.table' format in 'iceberg.table.name'.");
         }
 
         Map<String, String> catalogProps = new HashMap<>();
