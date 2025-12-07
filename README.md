@@ -16,6 +16,7 @@
 *   Java 11+
 *   Maven 3.6+
 *   AWS Credentials (for S3 and Glue access)
+*   Apache Flink 1.20.0 (or compatible cluster)
 
 ## Build
 
@@ -78,6 +79,34 @@ paimon.catalog.type=paimon
 paimon.catalog.warehouse=s3://your-bucket/paimon/
 paimon.table.name=paimon_orders
 ```
+
+## Running the Mock Server
+
+To simulate a Pixels data source, you can run the provided Mock Server. This server listens on port 50051 (or as configured) and generates mock data upon request.
+
+1.  Build the project (if not already built):
+    ```bash
+    mvn clean package
+    ```
+
+2.  Run the Mock Server:
+    ```bash
+    java -cp target/pixels-flink-source-1.0-SNAPSHOT.jar io.pixelsdb.pixels.flink.PixelsMockServer
+    ```
+    You should see a log message indicating the server has started.
+
+## Submitting to Flink Cluster
+
+To run the Flink job, submit the packaged JAR to your Flink cluster.
+
+1.  Make sure your Flink cluster is running.
+
+2.  Submit the job:
+    ```bash
+    flink run -c io.pixelsdb.pixels.flink.PixelsFlinkApp target/pixels-flink-source-1.0-SNAPSHOT.jar
+    ```
+
+3.  Monitor the job in the Flink Dashboard (usually at `http://localhost:8081`).
 
 ## AWS Setup
 
