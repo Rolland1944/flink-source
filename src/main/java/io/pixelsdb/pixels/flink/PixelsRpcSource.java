@@ -33,11 +33,12 @@ public class PixelsRpcSource extends RichSourceFunction<RowData> {
     private volatile boolean isRunning = true;
 
     public PixelsRpcSource(Properties props, RowType rowType) {
-        this.host = props.getProperty("pixels.server.host");
-        this.port = Integer.parseInt(props.getProperty("pixels.server.port"));
+        this.host = props.getProperty("pixels.server.host", "").trim();
+        this.port = Integer.parseInt(props.getProperty("pixels.server.port", "0").trim());
         this.schemaName = props.getProperty("schema.name", "public");
         this.tableName = props.getProperty("table.name");
         this.rowType = rowType;
+        LOG.info("Configured PixelsRpcSource with host='{}', port={}", host, port);
     }
 
     @Override
