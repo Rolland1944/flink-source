@@ -12,7 +12,10 @@ import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.flink.CatalogLoader;
 import org.apache.iceberg.flink.TableLoader;
 import org.apache.iceberg.flink.sink.FlinkSink;
+import org.apache.iceberg.flink.FlinkSchemaUtil;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.types.Type;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -60,7 +63,7 @@ public class PixelsFlinkApp {
         // Configure Sink based on type
         String sinkType = props.getProperty("sink.type");
         if ("iceberg".equalsIgnoreCase(sinkType)) {
-            configureIcebergSink(stream, props);
+            configureIcebergSink(stream, props, rowType);
         } else {
             configurePaimonSink(stream, props);
         }
@@ -104,7 +107,7 @@ public class PixelsFlinkApp {
         }
     }
 
-    private static void configureIcebergSink(DataStream<RowData> stream, Properties props) {
+    private static void configureIcebergSink(DataStream<RowData> stream, Properties props, RowType rowType) {
         String catalogType = props.getProperty("iceberg.catalog.type", "glue");
         String warehouse = props.getProperty("iceberg.catalog.warehouse");
         String tableNameStr = props.getProperty("iceberg.table.name");
@@ -153,6 +156,13 @@ public class PixelsFlinkApp {
             }
         }
         TableIdentifier identifier = TableIdentifier.of(dbName, tblName);
+
+        if (!catalog.tableExists(identifier)) {
+            Type icebergType = FlinkSchemaUtil.convert(rowType);
+            Schema icebergSchema = new Schema(icebergType.asStructType().fields());
+            catalog.createTable(identifier, icebergSchema);
+        }
+
         TableLoader tableLoader = TableLoader.fromCatalog(catalogLoader, identifier);
 
         FlinkSink.forRowData(stream)
