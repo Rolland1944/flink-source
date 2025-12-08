@@ -1,9 +1,10 @@
 syntax = "proto3";
 
 // Package name for the generated Java code
-package io.pixelsdb.pixels.sink.rpc;
+package sink.proto;
 
 // Outer class name for the generated Java classes
+option java_package = "io.pixelsdb.pixels.sink";
 option java_outer_classname = "PixelsPollingServiceProto";
 
 // RPC service definition - Service name clearly reflects polling mode

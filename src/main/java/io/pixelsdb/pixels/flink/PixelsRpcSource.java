@@ -1,11 +1,11 @@
 package io.pixelsdb.pixels.flink;
 
 import com.google.protobuf.ByteString;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.ColumnValue;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.OperationType;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.PollResponse;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.RowRecord;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.RowValue;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceProto.ColumnValue;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceProto.OperationType;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceProto.PollResponse;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceProto.RowRecord;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceProto.RowValue;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 import org.apache.flink.table.data.DecimalData;

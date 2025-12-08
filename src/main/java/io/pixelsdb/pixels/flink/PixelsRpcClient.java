@@ -3,9 +3,9 @@ package io.pixelsdb.pixels.flink;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceGrpc;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.PollRequest;
-import io.pixelsdb.pixels.sink.rpc.PixelsPollingServiceProto.PollResponse;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceGrpc;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceProto.PollRequest;
+import io.pixelsdb.pixels.sink.PixelsPollingServiceProto.PollResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
