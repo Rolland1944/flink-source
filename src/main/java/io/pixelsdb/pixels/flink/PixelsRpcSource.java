@@ -26,6 +26,8 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Properties;
 
@@ -125,54 +127,69 @@ public class PixelsRpcSource extends RichSourceFunction<RowData> {
         return row;
     }
 
+    private static String toHexString(byte[] bytes) {
+        if (bytes == null) return "null";
+        StringBuilder hexString = new StringBuilder();
+        for (byte b : bytes) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
+    }
+
     private Object parseValue(ByteString byteString, LogicalType type) {
+        LOG.info("[DEBUG] Attempting to parse Flink type: {}", type.asSummaryString());
         if (byteString == null || byteString.isEmpty()) {
+            LOG.info("  -> Received NULL or EMPTY bytes. Returning null.");
             return null;
         }
-
-        switch (type.getTypeRoot()) {
-            case BINARY:
-            case VARBINARY:
-                return byteString.toByteArray();
-            default:
-                // Continue to string parsing
-        }
-
-        String value = byteString.toStringUtf8();
-        
-        switch (type.getTypeRoot()) {
-            case CHAR:
-            case VARCHAR:
-                return StringData.fromString(value);
-            case INTEGER:
-                return Integer.parseInt(value);
-            case BIGINT:
-                return Long.parseLong(value);
-            case FLOAT:
-                return Float.parseFloat(value);
-            case DOUBLE:
-                return Double.parseDouble(value);
-            case BOOLEAN:
-                return Boolean.parseBoolean(value);
-            case DECIMAL:
-                DecimalType decimalType = (DecimalType) type;
-                return DecimalData.fromBigDecimal(new BigDecimal(value), decimalType.getPrecision(), decimalType.getScale());
-            case DATE:
-                return (int) LocalDate.parse(value).toEpochDay();
-            case TIME_WITHOUT_TIME_ZONE:
-                return (int) (LocalTime.parse(value).toNanoOfDay() / 1_000_000L);
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-                // Assuming format yyyy-MM-dd HH:mm:ss or ISO
-                try {
-                    return TimestampData.fromLocalDateTime(LocalDateTime.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-                } catch (Exception e) {
-                    // Fallback to ISO
-                    return TimestampData.fromLocalDateTime(LocalDateTime.parse(value));
-                }
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return TimestampData.fromInstant(ZonedDateTime.parse(value).toInstant());
-            default:
-                return StringData.fromString(value); // Fallback
+        LOG.info("  -> Received bytes (hex): {}", toHexString(byteString.toByteArray()));
+        Object result = null;
+        try {
+            ByteBuffer buffer = byteString.asReadOnlyByteBuffer(); 
+            
+            switch (type.getTypeRoot()) {
+                case INTEGER:
+                    result = buffer.getInt();
+                    break;
+                case BIGINT:
+                    result = buffer.getLong();
+                    break;
+                case FLOAT:
+                    result = buffer.getFloat();
+                    break;
+                case DOUBLE:
+                    result = buffer.getDouble();
+                    break;
+                case CHAR:
+                case VARCHAR:
+                    result = StringData.fromString(byteString.toStringUtf8());
+                    break;
+                case BOOLEAN:
+                    result = byteString.byteAt(0) != 0; 
+                    break;
+                case BINARY:
+                case VARBINARY:
+                    result = byteString.toByteArray();
+                    break;
+                case DATE:
+                    result = buffer.getInt(); 
+                    break;
+                
+                default:
+                    throw new IllegalArgumentException("Unsupported Flink LogicalType: " + type.getTypeRoot());
+            }
+            
+            LOG.info("  -> DECODED SUCCESSFULLY. Value: '{}', Java Class: '{}'",
+                result, (result == null) ? "null" : result.getClass().getName());
+            return result;
+        } catch (Exception e) {
+            LOG.error("!!! PARSING FAILED for Flink type {} with bytes (hex): {}",
+                    type.asSummaryString(), toHexString(byteString.toByteArray()), e);
+            throw new RuntimeException("Failed during parsing value for type " + type.asSummaryString(), e);
         }
     }
 
